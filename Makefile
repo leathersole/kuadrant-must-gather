@@ -15,7 +15,7 @@
 default: image
 
 HUB ?= quay.io/leathersole
-TAG ?= 0.0.1
+TAG ?= 0.0.2
 
 lint:
 	find . -name '*.sh' -print0 | xargs -0 -r shellcheck

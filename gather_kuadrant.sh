@@ -13,6 +13,10 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+. version
+echo "kuadrant/must-gather" > /must-gather/version
+version >> /must-gather/version
+
 BASE_COLLECTION_PATH="/must-gather"
 
 # make sure we honor --since and --since-time args passed to oc must-gather
@@ -30,7 +34,7 @@ get_log_collection_args() {
   fi
 }
 
-# Get the CRDs that belong to Istio
+# Get the CRDs that belong to Kuadrant
 function getCRDs() {
   local result=()
   local output
@@ -41,63 +45,6 @@ function getCRDs() {
 
   echo "${result[@]}"
 }
-
-# getSynchronization dumps the synchronization status for the specified control plane revision
-# to a file in the control plane revision directory of the control plane namespace
-# Arguments:
-#   namespace of the control plane
-#   revision of the control plane
-# Returns:
-#   nothing
-# function getSynchronization() {
-#   local namespace="${1}"
-#   local revision="${2}"
-
-#   local istiodName
-#   istiodName=$(oc get pod -n "${namespace}" -l "app=istiod,istio.io/rev=${revision}" -o jsonpath="{.items[0].metadata.name}")
-
-#   echo
-#   echo "Collecting /debug/syncz from ${istiodName} in namespace ${namespace}"
-
-#   local logPath=${BASE_COLLECTION_PATH}/namespaces/${namespace}/${revision}
-#   mkdir -p "${logPath}"
-#   oc exec "${istiodName}" -n "${namespace}" -c discovery -- /usr/local/bin/pilot-discovery request GET /debug/syncz > "${logPath}/debug-syncz.json" 2>&1
-# }
-
-# getEnvoyConfigForPodsInNamespace dumps the envoy config for the specified namespace and
-# control plane revision to a file in the must-gather directory for each pod
-# Arguments:
-#   namespace of the control plane
-#   revision of the control plane
-#   namespace to dump
-# Returns:
-#   nothing
-# function getEnvoyConfigForPodsInNamespace() {
-#   local controlPlaneNamespace="${1}"
-#   local revisionName="${2}"
-#   local podNamespace="${3}"
-
-#   local istiodName
-#   istiodName=$(oc get pod -n "${controlPlaneNamespace}" -l "app=istiod,istio.io/rev=${revisionName}" -o jsonpath="{.items[0].metadata.name}")
-
-#   echo
-#   echo "Collecting Envoy config for pods in ${podNamespace} pointing to ${revisionName} revision"
-
-#   local pods
-#   pods="$(oc get pods -n "${podNamespace}" -o jsonpath='{ .items[*].metadata.name }')"
-#   for podName in ${pods}; do
-#     if oc get pod -o yaml "${podName}" -n "${podNamespace}" | grep -q proxyv2; then
-#       echo "Collecting config_dump and stats for pod ${podName}.${podNamespace}"
-
-#       local logPath=${BASE_COLLECTION_PATH}/namespaces/${podNamespace}/pods/${podName}
-#       mkdir -p "${logPath}"
-
-#       oc exec "${istiodName}" -n "${controlPlaneNamespace}" -c discovery -- bash -c "/usr/local/bin/pilot-discovery request GET /debug/config_dump?proxyID=${podName}.${podNamespace}" > "${logPath}/config_dump_istiod.json" 2>&1
-#       oc exec -n "${podNamespace}" "${podName}" -c istio-proxy -- /usr/local/bin/pilot-agent request GET config_dump > "${logPath}/config_dump_proxy.json" 2>&1
-#       oc exec -n "${podNamespace}" "${podName}" -c istio-proxy -- /usr/local/bin/pilot-agent request GET stats > "${logPath}/proxy_stats" 2>&1
-#     fi
-#   done
-# }
 
 function getKuadrantNamespaces() {
   local result=()
@@ -110,14 +57,6 @@ function getKuadrantNamespaces() {
   done
 
   echo "$(unique ${result})"
-}
-
-function version() {
-  if [[ -n $OSSM_MUST_GATHER_VERSION ]] ; then
-    echo "${OSSM_MUST_GATHER_VERSION}"
-  else
-    echo "0.0.0-unknown"
-  fi
 }
 
 # Inspect given resource in given namespace (optional)
@@ -187,18 +126,11 @@ function main() {
 
   inspect nodes
 
-  # TODO: we have to add a new label in the helm postrenderer section in the operator the same way like 'metadata.ownerReferences' is added
-  # 'install.operator.istio.io/owning-resource' should not be used as it could interfere with istioctl
-  # using 'metadata.ownerReferences' is not a good solution, we should use the new label when ready
-  # this needs to be revisited when working on https://issues.redhat.com/browse/OSSM-6804
   for r in $(oc get clusterroles,clusterrolebindings -l operators.coreos.com/kuadrant-operator.kuadrant-system -oname); do
     inspect "$r"
   done
-  # for r in $(oc get clusterroles,clusterrolebindings -l 'app in (istiod,istio-reader)' -oname); do
-  #   inspect "$r"
-  # done
 
-  # inspect all istio.io CRDs
+  # inspect all kuadrant.io CRDs
   crds="$(getCRDs)"
   for crd in ${crds}; do
     inspect "crd/${crd}"
@@ -208,53 +140,6 @@ function main() {
   for namespace in ${kuardantNamespaces}; do
     inspectNamespace ${namespace}
   done;
-  # inspect all controlled mutatingwebhookconfiguration
-  # for mwc in $(oc get mutatingwebhookconfiguration -l app=sidecar-injector -o name);do
-  #   inspect "${mwc}"
-  # done
-  # inspect all controlled validatingwebhookconfiguration
-  # for vwc in $(oc get validatingwebhookconfiguration -l app=istiod -o name);do
-  #   inspect "${vwc}"
-  # done
-
-  # this will just store all CRs as those are cluster-scoped resources
-  # inspect "Istio"
-  # inspect "IstioRevision"
-  # inspect "IstioCNI"
-  #TODO: remoteIstio
-  #TODO: kiali??
-
-  # istioCniNamespace=$(oc get IstioCNI -A -o jsonpath="{.items[0].spec.namespace}")
-  # if [ -n "$istioCniNamespace" ]
-  # then
-  #   inspectNamespace "${istioCniNamespace}"
-  # fi
-
-  # inspect all namespaces with Istio components
-  # controlPlanes=$(oc get IstioRevision -o custom-columns=NAME:spec.namespace --no-headers | sort -u)
-  # for cp in ${controlPlanes}; do
-  #   echo
-  #   echo "Processing control plane namespace: ${cp}"
-
-  #   inspectNamespace "$cp"
-  # done
-
-  # iterate over all Istio revisions
-  # for ir in $(oc get IstioRevision -o jsonpath="{.items[*].metadata.name}"); do
-  #   echo
-  #   echo "Inspecting ${ir} IstioRevision"
-  #   cpNamespace=$(oc get IstioRevision "${ir}" -o jsonpath="{.spec.namespace}")
-
-    # getSynchronization "${cpNamespace}" "${ir}"
-
-    # iterate over all namespaces which have pods with proxy pointing to this control plane revision
-    # for dpn in $(oc get pods -A -o=jsonpath="{.items[?(@.metadata.annotations.istio\.io/rev==\"${ir}\")].metadata.namespace}" | tr ' ' '\n' | sort -u); do
-    #   echo
-    #   echo "Inspecting ${dpn} data plane namespace"
-    #   inspectNamespace "${dpn}"
-    #   getEnvoyConfigForPodsInNamespace "${cpNamespace}" "${ir}" "${dpn}"
-    # done
-# done
 
 echo
 echo
